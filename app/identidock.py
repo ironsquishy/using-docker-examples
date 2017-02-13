@@ -1,30 +1,47 @@
 
 from flask import Flask, Response, request
 import requests
+import hashlib
+import redis
 
 app = Flask(__name__)
 default_name = 'Joe Bloggs'
+cache = redis.StrictRedis(host='redis', port=6379, db=0)
+salt = "UNIQUE_SALT"
+
+
 
 @app.route('/', methods=['GET', 'POST'])
 def mainpage():
     name = default_name
+    if request.method == 'POST':
+        name = request.form['name']
+
+    salted_name = salt + name
+    hash_name = hashlib.sha256(salted_name.encode()).hexdigest()
 
     header = '<html><head><title>Identidock</title></head><body>'
     body = '''<form method="POST">
-              Hello <input type="text" name="name" placeholder="{}">
+              Hello <input type="text" name="name" placeholder="{0}">
               <input type="submit" value="submit">
               </form>
               <p>You look like a :
-              <img src="/monster/monster.png"/>
+              <img src="/monster/{1}"/>
               </p>
-           '''.format(name)
+           '''.format(name, hash_name)
     footer = '</body></html>'
+
     return header + body + footer
 
 @app.route('/monster/<name>')
 def get_identicon(name):
-    r = request.get('http://dnmonster:8080/monster/' + name + '?size=80')
-    image = r.content
+    image = cache.get(name)
+    if image is None:
+        print("Cache miss", flush=True)
+        r = requests.get('http://dnmonster:8080/monster/' + name + '?size=80')
+        image = r.content
+        cache.set(name, image)
+
     return Response(image, mimetype='image/png')
 
 if __name__ == '__main__':
